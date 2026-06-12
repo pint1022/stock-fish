@@ -145,7 +145,7 @@ class LegacyConfigAdapter:
         return getattr(
             self._settings,
             "REALTIME_SOURCE_PRIORITY",
-            "tencent,akshare_sina,efinance,akshare_em",
+            "alpaca,tencent,akshare_sina,efinance,akshare_em",
         )
 
     @property
@@ -199,6 +199,30 @@ class LegacyConfigAdapter:
     @property
     def alphavantage_api_key(self) -> Optional[str]:
         return getattr(self._settings, "ALPHAVANTAGE_API_KEY", None)
+
+    @property
+    def alpaca_api_key(self) -> Optional[str]:
+        return getattr(self._settings, "ALPACA_API_KEY", None)
+
+    @property
+    def alpaca_secret_key(self) -> Optional[str]:
+        return getattr(self._settings, "ALPACA_SECRET_KEY", None)
+
+    @property
+    def alpaca_data_base_url(self) -> str:
+        return getattr(self._settings, "ALPACA_DATA_BASE_URL", "https://data.alpaca.markets")
+
+    @property
+    def alpaca_trading_base_url(self) -> str:
+        return getattr(self._settings, "ALPACA_TRADING_BASE_URL", "https://api.alpaca.markets/v2")
+
+    @property
+    def alpaca_base_url(self) -> Optional[str]:
+        return getattr(self._settings, "ALPACA_BASE_URL", None)
+
+    @property
+    def alpaca_stock_feed(self) -> str:
+        return getattr(self._settings, "ALPACA_STOCK_FEED", "iex")
 
     @property
     def longbridge_app_key(self) -> Optional[str]:

@@ -102,6 +102,7 @@ class RealtimeSource(Enum):
     SINA = "sina"                   # 新浪直连
     STOOQ = "stooq"                 # Stooq 美股兜底
     LONGBRIDGE = "longbridge"       # 长桥（美股/港股兜底）
+    ALPACA = "alpaca"               # Alpaca（美股/加密货币）
     FALLBACK = "fallback"           # 降级兜底
 
 
@@ -123,6 +124,11 @@ class UnifiedRealtimeQuote:
     price: Optional[float] = None           # 最新价
     change_pct: Optional[float] = None      # 涨跌幅(%)
     change_amount: Optional[float] = None   # 涨跌额
+    timestamp: Optional[str] = None         # 行情时间戳
+    bid_price: Optional[float] = None       # 买一价
+    bid_size: Optional[float] = None        # 买一量
+    ask_price: Optional[float] = None       # 卖一价
+    ask_size: Optional[float] = None        # 卖一量
     
     # === 量价指标（部分源可能缺失）===
     volume: Optional[int] = None            # 成交量（股，与历史日线口径一致）
@@ -157,7 +163,9 @@ class UnifiedRealtimeQuote:
         }
         # 只添加非 None 的字段
         optional_fields = [
-            'price', 'change_pct', 'change_amount', 'volume', 'amount',
+            'price', 'change_pct', 'change_amount',
+            'timestamp', 'bid_price', 'bid_size', 'ask_price', 'ask_size',
+            'volume', 'amount',
             'volume_ratio', 'turnover_rate', 'amplitude',
             'open_price', 'high', 'low', 'pre_close',
             'pe_ratio', 'pb_ratio', 'total_mv', 'circ_mv',

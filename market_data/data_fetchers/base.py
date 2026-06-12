@@ -1041,6 +1041,7 @@ class DataFetcherManager:
 
         优先级动态调整逻辑：
         - 如果配置了 TUSHARE_TOKEN：实例化 TushareFetcher，并按其内部逻辑提升优先级
+        - 如果配置了 Alpaca 凭据：实例化 AlpacaFetcher 作为美股/加密货币实时行情源
         - 如果配置了 Longbridge 凭据：实例化 LongbridgeFetcher 作为美股/港股兜底
         - 未配置的可选数据源不实例化，避免在批量拉取时反复探测无效源
         - 默认优先级：
@@ -1058,6 +1059,7 @@ class DataFetcherManager:
         from market_data.data_fetchers.baostock_fetcher import BaostockFetcher
         from market_data.data_fetchers.yfinance_fetcher import YfinanceFetcher
         from market_data.data_fetchers.longbridge_fetcher import LongbridgeFetcher
+        from market_data.data_fetchers.alpaca_fetcher import AlpacaFetcher
         config = get_config()
         # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
         efinance = EfinanceFetcher()
@@ -1082,6 +1084,13 @@ class DataFetcherManager:
             optional_fetchers.append(LongbridgeFetcher())  # 长桥（美股/港股兜底，懒加载）
         else:
             logger.debug("[数据源初始化] 跳过未配置的 LongbridgeFetcher")
+
+        alpaca_api_key = (getattr(config, "alpaca_api_key", None) or "").strip()
+        alpaca_secret_key = (getattr(config, "alpaca_secret_key", None) or "").strip()
+        if alpaca_api_key and alpaca_secret_key:
+            optional_fetchers.append(AlpacaFetcher())
+        else:
+            logger.debug("[数据源初始化] 跳过未配置的 AlpacaFetcher")
 
         finnhub_api_key = (getattr(config, "finnhub_api_key", None) or "").strip()
         if finnhub_api_key:
@@ -1457,8 +1466,7 @@ class DataFetcherManager:
         # Normalize code (strip SH/SZ prefix etc.)
         stock_code = normalize_stock_code(stock_code)
 
-        from market_data.data_fetchers.akshare_fetcher import _is_us_code
-        from market_data.data_fetchers.us_index_mapping import is_us_index_code
+        from market_data.data_fetchers.us_index_mapping import is_us_index_code, is_us_stock_code
         from market_data.compat import get_config
 
         config = get_config()
@@ -1468,55 +1476,126 @@ class DataFetcherManager:
             logger.debug(f"[实时行情] 功能已禁用，跳过 {stock_code}")
             return None
 
-        # ----------------------------------------------------------
-        # 美股 (指数 + 个股) / 港股 — 专用双源路由
-        #   配置长桥后: Longbridge 首选, YFinance/AkShare 补充
-        #   未配置长桥: YFinance/AkShare 首选, Longbridge 补充
-        #   美股指数:   始终 YFinance 首选（Longbridge 不提供指数行情）
-        # ----------------------------------------------------------
-        is_us_index = is_us_index_code(stock_code)
-        is_us = is_us_index or _is_us_code(stock_code)
-        is_hk = (not is_us) and _is_hk_market(stock_code)
-
-        if is_us or is_hk:
-            prefer_lb = self._longbridge_preferred() and not is_us_index
-            if is_us:
-                primary_src = "LongbridgeFetcher" if prefer_lb else "YfinanceFetcher"
-                secondary_src = "YfinanceFetcher" if prefer_lb else "LongbridgeFetcher"
-                market_label = "美股指数" if is_us_index else "美股"
-                primary_kw: dict = {}
-                secondary_kw: dict = {}
-            else:
-                primary_src = "LongbridgeFetcher" if prefer_lb else "AkshareFetcher"
-                secondary_src = "AkshareFetcher" if prefer_lb else "LongbridgeFetcher"
-                market_label = "港股"
-                primary_kw = {"source": "hk"} if primary_src == "AkshareFetcher" else {}
-                secondary_kw = {"source": "hk"} if secondary_src == "AkshareFetcher" else {}
-
-            primary_quote = self._try_fetcher_quote(stock_code, primary_src, **primary_kw)
-            if primary_quote is not None:
-                logger.info(f"[实时行情] {market_label} {stock_code} 成功获取 (来源: {primary_src})")
-            primary_quote = self._supplement_quote(
-                stock_code, primary_quote, secondary_src, **secondary_kw,
-            )
-            # 美股个股（非指数）尝试从 Finnhub/AlphaVantage 补充缺失字段
-            if is_us and not is_us_index and primary_quote is not None:
-                for extra_src in ["FinnhubFetcher", "AlphaVantageFetcher"]:
-                    primary_quote = self._supplement_quote(
-                        stock_code, primary_quote, extra_src,
-                    )
-            if primary_quote is not None:
-                return primary_quote
-            if log_final_failure:
-                logger.info(f"[实时行情] {market_label} {stock_code} 无可用数据源")
-            return None
-        
-        # 获取配置的数据源优先级
+        # 获取配置的数据源优先级。A股、US/HK/crypto 路由共用同一配置，
+        # 但各市场只采用自己支持的数据源。
         source_priority = [
             source.strip().lower()
             for source in config.realtime_source_priority.split(',')
             if source.strip()
         ]
+
+        # ----------------------------------------------------------
+        # 美股 (指数 + 个股) / 港股 / 加密货币 — 专用路由
+        #   REALTIME_SOURCE_PRIORITY 控制首选顺序，随后追加市场默认兜底链。
+        #   Alpaca 支持美股个股和加密货币，不用于美股指数。
+        #   美股指数:   始终 YFinance 首选（Longbridge 不提供指数行情）
+        # ----------------------------------------------------------
+        from market_data.data_fetchers.alpaca_fetcher import normalize_alpaca_crypto_symbol
+
+        is_us_index = is_us_index_code(stock_code)
+        is_us = is_us_index or is_us_stock_code(stock_code)
+        is_hk = (not is_us) and _is_hk_market(stock_code)
+        is_crypto = (not is_us and not is_hk) and normalize_alpaca_crypto_symbol(raw_stock_code or stock_code) is not None
+
+        if is_us or is_hk or is_crypto:
+            prefer_lb = self._longbridge_preferred() and not is_us_index
+            source_map: Dict[str, Tuple[str, dict]] = {}
+            default_order: List[Tuple[str, dict]] = []
+
+            if is_crypto:
+                market_label = "加密货币"
+                source_map = {
+                    "alpaca": ("AlpacaFetcher", {}),
+                }
+                default_order = [("AlpacaFetcher", {})]
+            elif is_us:
+                market_label = "美股指数" if is_us_index else "美股"
+                if is_us_index:
+                    source_map = {
+                        "yfinance": ("YfinanceFetcher", {}),
+                        "finnhub": ("FinnhubFetcher", {}),
+                    }
+                    default_order = [("YfinanceFetcher", {}), ("FinnhubFetcher", {})]
+                else:
+                    source_map = {
+                        "alpaca": ("AlpacaFetcher", {}),
+                        "yfinance": ("YfinanceFetcher", {}),
+                        "longbridge": ("LongbridgeFetcher", {}),
+                        "finnhub": ("FinnhubFetcher", {}),
+                        "alphavantage": ("AlphaVantageFetcher", {}),
+                    }
+                    default_order = (
+                        [
+                            ("LongbridgeFetcher", {}),
+                            ("AlpacaFetcher", {}),
+                            ("YfinanceFetcher", {}),
+                            ("FinnhubFetcher", {}),
+                            ("AlphaVantageFetcher", {}),
+                        ]
+                        if prefer_lb
+                        else [
+                            ("AlpacaFetcher", {}),
+                            ("YfinanceFetcher", {}),
+                            ("LongbridgeFetcher", {}),
+                            ("FinnhubFetcher", {}),
+                            ("AlphaVantageFetcher", {}),
+                        ]
+                    )
+            else:
+                market_label = "港股"
+                source_map = {
+                    "longbridge": ("LongbridgeFetcher", {}),
+                    "akshare": ("AkshareFetcher", {"source": "hk"}),
+                    "akshare_hk": ("AkshareFetcher", {"source": "hk"}),
+                }
+                default_order = (
+                    [("LongbridgeFetcher", {}), ("AkshareFetcher", {"source": "hk"})]
+                    if prefer_lb
+                    else [("AkshareFetcher", {"source": "hk"}), ("LongbridgeFetcher", {})]
+                )
+
+            ordered_sources: List[Tuple[str, dict]] = []
+            seen_sources = set()
+
+            def add_ordered_source(item: Tuple[str, dict]) -> None:
+                key = item[0]
+                if key in seen_sources:
+                    return
+                seen_sources.add(key)
+                ordered_sources.append(item)
+
+            for source in source_priority:
+                mapped = source_map.get(source)
+                if mapped is not None:
+                    add_ordered_source(mapped)
+            for item in default_order:
+                add_ordered_source(item)
+
+            primary_quote = None
+            for fetcher_name, fetcher_kw in ordered_sources:
+                quote = self._try_fetcher_quote(stock_code, fetcher_name, **fetcher_kw)
+                if quote is None:
+                    continue
+                if primary_quote is None:
+                    primary_quote = quote
+                    logger.info(f"[实时行情] {market_label} {stock_code} 成功获取 (来源: {fetcher_name})")
+                    if not self._quote_needs_supplement(primary_quote):
+                        return primary_quote
+                    continue
+
+                filled = self._merge_quote_fields(primary_quote, quote)
+                if filled:
+                    logger.info(
+                        f"[实时行情] {stock_code} 从 {fetcher_name} 补充了缺失字段: {filled}"
+                    )
+                if not self._quote_needs_supplement(primary_quote):
+                    return primary_quote
+
+            if primary_quote is not None:
+                return primary_quote
+            if log_final_failure:
+                logger.info(f"[实时行情] {market_label} {stock_code} 无可用数据源")
+            return None
         
         errors = []
         # primary_quote holds the first successful result; we may supplement
@@ -1552,6 +1631,11 @@ class DataFetcherManager:
                 
                 elif source == "tushare":
                     fetcher = self._get_fetcher_by_name("TushareFetcher", capability="realtime_quote")
+                    if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
+                        quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', raw_stock_code or stock_code)
+
+                elif source == "alpaca":
+                    fetcher = self._get_fetcher_by_name("AlpacaFetcher", capability="realtime_quote")
                     if fetcher is not None and hasattr(fetcher, 'get_realtime_quote'):
                         quote = self._call_fetcher_method(fetcher, 'get_realtime_quote', raw_stock_code or stock_code)
 

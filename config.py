@@ -14,8 +14,9 @@ from typing import Optional
 # 添加 BettaFish 和 MiroFish 到 Python 路径以便 import
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-# 将 .env 加载到 os.environ（兼容直接读取 os.environ 的代码）
-load_dotenv(PROJECT_ROOT / ".env")
+# 将 .env 加载到 os.environ（兼容直接读取 os.environ 的代码）。
+# override=True keeps long-lived IDE/shell sessions from shadowing updated .env values.
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 BETTAFISH_DIR = str(PROJECT_ROOT.parent / "BettaFish")
 MIROFISH_DIR = str(PROJECT_ROOT.parent / "MiroFish" / "backend")
 
@@ -46,6 +47,11 @@ class Settings(BaseSettings):
     LONGBRIDGE_APP_KEY: Optional[str] = None
     LONGBRIDGE_APP_SECRET: Optional[str] = None
     LONGBRIDGE_ACCESS_TOKEN: Optional[str] = None
+    ALPACA_API_KEY: Optional[str] = None
+    ALPACA_SECRET_KEY: Optional[str] = None
+    ALPACA_DATA_BASE_URL: str = "https://data.alpaca.markets"
+    ALPACA_TRADING_BASE_URL: str = "https://api.alpaca.markets/v2"
+    ALPACA_STOCK_FEED: str = "iex"
     FINNHUB_API_KEY: Optional[str] = None
     ALPHAVANTAGE_API_KEY: Optional[str] = None
     TICKFLOW_API_KEY: Optional[str] = None
@@ -70,7 +76,7 @@ class Settings(BaseSettings):
     SEARXNG_PUBLIC_INSTANCES_ENABLED: bool = True
 
     # ---- 实时行情优先级 ----
-    REALTIME_SOURCE_PRIORITY: str = "tencent,akshare_sina,efinance,akshare_em"
+    REALTIME_SOURCE_PRIORITY: str = "alpaca,tencent,akshare_sina,efinance,akshare_em"
     REALTIME_CACHE_TTL: int = 600
     CIRCUIT_BREAKER_COOLDOWN: int = 300
 
