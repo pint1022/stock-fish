@@ -25,6 +25,7 @@ from typing import Optional, List, Dict, Callable, Any
 from loguru import logger
 
 from analysis.agent import StockAnalysisAgent
+from analysis.llm_params import temperature_kwargs
 
 
 class BatchAnalyzer:
@@ -406,9 +407,9 @@ class BatchAnalyzer:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=temperature,
             response_format={"type": "json_object"},
             max_tokens=4096,
+            **temperature_kwargs(temperature),
         )
 
         raw = resp.choices[0].message.content or "{}"

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MODEL_NAME: str = "gpt-4o-mini"
+    LLM_TEMPERATURE: Optional[float] = None
 
     # ===== 数据源 =====
     AKSHARE_PROXY: Optional[str] = None
@@ -79,6 +80,13 @@ class Settings(BaseSettings):
     REALTIME_SOURCE_PRIORITY: str = "alpaca,tencent,akshare_sina,efinance,akshare_em"
     REALTIME_CACHE_TTL: int = 600
     CIRCUIT_BREAKER_COOLDOWN: int = 300
+    EFINANCE_CALL_TIMEOUT: int = 3
+    ALPACA_PRIORITY: int = 0
+    YFINANCE_PRIORITY: int = 1
+    PYTDX_PRIORITY: int = 2
+    BAOSTOCK_PRIORITY: int = 3
+    AKSHARE_PRIORITY: int = 4
+    EFINANCE_PRIORITY: int = 5
 
     # ---- 特性开关 ----
     ENABLE_REALTIME_QUOTE: bool = True

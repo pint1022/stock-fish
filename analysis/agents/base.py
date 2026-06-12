@@ -14,6 +14,8 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from loguru import logger
 
+from analysis.llm_params import temperature_kwargs
+
 
 @dataclass
 class EmployeeReport:
@@ -131,8 +133,8 @@ class BaseAgent:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "temperature": temperature,
                 }
+                kwargs.update(temperature_kwargs(temperature))
                 if use_json_mode:
                     kwargs["response_format"] = {"type": "json_object"}
                     kwargs["max_tokens"] = 4096  # CIO 决策 JSON 较长，需要足够 token

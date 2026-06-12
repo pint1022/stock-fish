@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 
 from loguru import logger
 
+from analysis.llm_params import temperature_kwargs
+
 
 @dataclass
 class AgentView:
@@ -295,8 +297,8 @@ class PredictionNode:
                 {"role": "system", "content": f"你是A股{role}分析专家。请仅基于提供的数据给出独立判断。输出严格JSON。"},
                 {"role": "user", "content": full_prompt},
             ],
-            temperature=0.3,
             response_format={"type": "json_object"},
+            **temperature_kwargs(0.3),
         )
         raw = resp.choices[0].message.content or "{}"
         d = self._parse_json(raw)
@@ -320,8 +322,8 @@ class PredictionNode:
                     {"role": "system", "content": "你是A股投资委员会主席。三位分析师（技术面、基本面、舆情）已给出独立判断。请你审阅三方观点，辩论、裁决，输出最终预测JSON。"},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.3,
                 response_format={"type": "json_object"},
+                **temperature_kwargs(0.3),
             )
             raw = resp.choices[0].message.content or "{}"
             result = self._parse_json(raw)

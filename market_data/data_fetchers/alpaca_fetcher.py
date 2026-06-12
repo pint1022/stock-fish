@@ -8,6 +8,7 @@ Markets: US stocks and crypto pairs
 
 import logging
 import os
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -59,7 +60,7 @@ def _nested_symbol_payload(payload: Dict[str, Any], key: str, symbol: str) -> Di
 
 class AlpacaFetcher(BaseFetcher):
     name = "AlpacaFetcher"
-    priority = 1
+    priority = int(os.getenv("ALPACA_PRIORITY", "0"))
 
     def __init__(
         self,
@@ -155,15 +156,69 @@ class AlpacaFetcher(BaseFetcher):
         )
 
     def is_available_for_request(self, capability: str = "") -> bool:
-        if capability and capability != "realtime_quote":
+        if capability and capability not in {"realtime_quote", "daily_data"}:
             return False
         return bool(self._api_key and self._secret_key)
 
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-        raise DataFetchError("[Alpaca] daily data is not implemented in StockFish")
+        from alpaca.data.requests import StockBarsRequest  # pyright: ignore[reportMissingImports]
+        from alpaca.data.timeframe import TimeFrame  # pyright: ignore[reportMissingImports]
+
+        symbol = stock_code.strip().upper()
+        if not is_us_stock_code(symbol):
+            raise DataFetchError(f"[Alpaca] {stock_code} is not a US stock")
+
+        start = pd.Timestamp(start_date).to_pydatetime()
+        # Alpaca's end timestamp is exclusive for daily bars. Add one day so
+        # callers using inclusive YYYY-MM-DD ranges get the requested end date.
+        end = (pd.Timestamp(end_date) + timedelta(days=1)).to_pydatetime()
+        response = self._get_stock_client().get_stock_bars(
+            StockBarsRequest(
+                symbol_or_symbols=[symbol],
+                timeframe=TimeFrame.Day,
+                start=start,
+                end=end,
+                feed=self._stock_data_feed(),
+            )
+        )
+        rows = []
+        for bar in self._bar_list(response, symbol):
+            timestamp = self._field(bar, "timestamp", "t")
+            if timestamp is None:
+                continue
+            rows.append(
+                {
+                    "date": pd.Timestamp(timestamp).date(),
+                    "open": safe_float(self._field(bar, "open", "o")),
+                    "high": safe_float(self._field(bar, "high", "h")),
+                    "low": safe_float(self._field(bar, "low", "l")),
+                    "close": safe_float(self._field(bar, "close", "c")),
+                    "volume": safe_int(self._field(bar, "volume", "v")) or 0,
+                }
+            )
+
+        if not rows:
+            raise DataFetchError(f"[Alpaca] No daily bars for {symbol}")
+
+        return pd.DataFrame(rows)
 
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
-        return df
+        if df.empty:
+            return df
+
+        normalized = df.copy()
+        normalized["date"] = pd.to_datetime(normalized["date"]).dt.date
+        numeric_cols = ["open", "high", "low", "close", "volume"]
+        for col in numeric_cols:
+            normalized[col] = pd.to_numeric(normalized[col], errors="coerce")
+        normalized = normalized.sort_values("date", ascending=True).reset_index(drop=True)
+        normalized["pct_chg"] = normalized["close"].pct_change().fillna(0) * 100
+        normalized["pct_chg"] = normalized["pct_chg"].round(2)
+        normalized["amount"] = normalized["volume"] * normalized["close"]
+        normalized["code"] = stock_code.strip().upper()
+
+        keep = ["code", "date", "open", "high", "low", "close", "volume", "amount", "pct_chg"]
+        return normalized[[col for col in keep if col in normalized.columns]]
 
     def _headers(self) -> Dict[str, str]:
         return {

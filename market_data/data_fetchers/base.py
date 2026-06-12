@@ -569,8 +569,8 @@ class DataFetcherManager:
         "BaostockFetcher": {"cn"},
         "YfinanceFetcher": {"cn", "hk", "us"},
         "LongbridgeFetcher": {"hk", "us"},
+        "AlpacaFetcher": {"us"},
         "FinnhubFetcher": {"us"},
-        "AlphaVantageFetcher": {"us"},
     }
 
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
@@ -1191,17 +1191,17 @@ class DataFetcherManager:
             raise DataFetchError(error_summary)
 
         # 美股（含美股指数）使用专用路由；港股走下方通用数据源循环
-        # Failover chain: Finnhub(P2) -> AlphaVantage(P3) -> Yfinance(P4) -> Longbridge(P5)
-        # When Longbridge preferred: Longbridge -> Finnhub -> AlphaVantage -> Yfinance
+        # Failover chain: Alpaca -> YFinance -> Finnhub -> Longbridge.
+        # When Longbridge preferred: Longbridge -> Alpaca -> YFinance -> Finnhub.
         if is_us:
             prefer_lb = self._longbridge_preferred(capability="daily_data") and not is_us_index
             if is_us_index:
                 # 指数始终 YFinance 首选（Longbridge 不提供指数K线）
                 source_order = ["YfinanceFetcher", "FinnhubFetcher"]
             elif prefer_lb:
-                source_order = ["LongbridgeFetcher", "FinnhubFetcher", "AlphaVantageFetcher", "YfinanceFetcher"]
+                source_order = ["LongbridgeFetcher", "AlpacaFetcher", "YfinanceFetcher", "FinnhubFetcher"]
             else:
-                source_order = ["FinnhubFetcher", "AlphaVantageFetcher", "YfinanceFetcher", "LongbridgeFetcher"]
+                source_order = ["AlpacaFetcher", "YfinanceFetcher", "FinnhubFetcher", "LongbridgeFetcher"]
             market_label = "美股指数" if is_us_index else "美股"
 
             for order_index, src_name in enumerate(source_order):

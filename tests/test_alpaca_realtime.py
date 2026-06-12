@@ -1,7 +1,7 @@
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -157,6 +157,57 @@ class AlpacaFetcherTests(unittest.TestCase):
         self.assertEqual(len(captured_quote_requests), 1)
         self.assertEqual(captured_quote_requests[0].symbol_or_symbols, ["AAPL"])
         self.assertEqual(getattr(captured_quote_requests[0].feed, "value", None), "iex")
+
+    def test_get_daily_data_fetches_stock_bars(self):
+        fetcher = AlpacaFetcher(api_key="key", secret_key="secret")
+        captured_bar_requests = []
+
+        def fake_get_stock_bars(request):
+            captured_bar_requests.append(request)
+            return {
+                "MU": [
+                    SimpleNamespace(
+                        timestamp=pd.Timestamp("2026-06-09 00:00:00"),
+                        open=123.0,
+                        high=125.0,
+                        low=122.0,
+                        close=124.0,
+                        volume=1000,
+                        trade_count=10,
+                        vwap=123.5,
+                    ),
+                    SimpleNamespace(
+                        timestamp=pd.Timestamp("2026-06-10 00:00:00"),
+                        open=124.0,
+                        high=127.0,
+                        low=123.0,
+                        close=126.0,
+                        volume=1200,
+                        trade_count=12,
+                        vwap=125.5,
+                    ),
+                ]
+            }
+
+        fake_client = SimpleNamespace(get_stock_bars=fake_get_stock_bars)
+
+        with patch(
+            "alpaca.data.historical.stock.StockHistoricalDataClient",
+            return_value=fake_client,
+        ):
+            df = fetcher.get_daily_data(
+                "MU",
+                start_date="2026-06-09",
+                end_date="2026-06-10",
+            )
+
+        self.assertEqual(len(captured_bar_requests), 1)
+        request = captured_bar_requests[0]
+        self.assertEqual(request.symbol_or_symbols, ["MU"])
+        self.assertEqual(getattr(request.feed, "value", None), "iex")
+        self.assertEqual(list(df["close"]), [124.0, 126.0])
+        self.assertEqual(list(df["volume"]), [1000, 1200])
+        self.assertIn("pct_chg", df.columns)
 
     @unittest.skipUnless(
         os.getenv("RUN_ALPACA_LIVE_TESTS") == "1",
@@ -325,6 +376,67 @@ class AlpacaFetcherTests(unittest.TestCase):
 
         self.assertEqual(quote.source, RealtimeSource.ALPACA)
         self.assertEqual(calls, [("alpaca", "AAPL")])
+
+    def test_manager_routes_us_daily_data_to_alpaca_before_yfinance(self):
+        calls = []
+        expected = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-06-10"]),
+                "open": [10.0],
+                "high": [11.0],
+                "low": [9.5],
+                "close": [10.5],
+                "volume": [1000],
+                "amount": [10500.0],
+                "pct_chg": [0.0],
+            }
+        )
+
+        class FakeAlpaca:
+            name = "AlpacaFetcher"
+            priority = 0
+
+            def get_daily_data(self, **kwargs):
+                calls.append(("alpaca", kwargs["stock_code"]))
+                return expected
+
+            def is_available_for_request(self, capability=""):
+                return capability == "daily_data"
+
+        class FakeAlphaVantage:
+            name = "AlphaVantageFetcher"
+            priority = 3
+
+            def get_daily_data(self, **kwargs):
+                raise AssertionError("AlphaVantage should not be used for US daily data")
+
+            def is_available_for_request(self, capability=""):
+                return capability == "daily_data"
+
+        class FakeYfinance:
+            name = "YfinanceFetcher"
+            priority = 1
+
+            def get_daily_data(self, **kwargs):
+                calls.append(("yfinance", kwargs["stock_code"]))
+                return expected
+
+            def is_available_for_request(self, capability=""):
+                return capability == "daily_data"
+
+        manager = DataFetcherManager(fetchers=[FakeAlphaVantage(), FakeYfinance(), FakeAlpaca()])
+        manager._fundamental_adapter = Mock()
+        manager._yfinance_fundamental_adapter = Mock()
+
+        df, source = manager.get_daily_data(
+            "MU",
+            start_date="2026-06-10",
+            end_date="2026-06-10",
+        )
+
+        self.assertEqual(source, "AlpacaFetcher")
+        self.assertEqual(calls, [("alpaca", "MU")])
+        self.assertTrue(df.equals(expected))
 
 
 if __name__ == "__main__":
