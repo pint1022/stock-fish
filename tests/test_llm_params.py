@@ -22,6 +22,22 @@ class LLMParamsTests(unittest.TestCase):
         with patch("config.settings", SimpleNamespace()):
             self.assertEqual(temperature_kwargs(0.3), {"temperature": 0.3})
 
+    def test_gpt_5_uses_max_completion_tokens(self):
+        from analysis.llm_params import token_limit_kwargs
+
+        self.assertEqual(
+            token_limit_kwargs("gpt-5.5", 4096),
+            {"max_completion_tokens": 4096},
+        )
+
+    def test_legacy_models_use_max_tokens(self):
+        from analysis.llm_params import token_limit_kwargs
+
+        self.assertEqual(
+            token_limit_kwargs("gpt-4o-mini", 4096),
+            {"max_tokens": 4096},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

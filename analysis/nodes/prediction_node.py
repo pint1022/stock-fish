@@ -75,6 +75,8 @@ class PredictionNode:
         self.api_key = api_key or os.environ.get('LLM_API_KEY') or getattr(settings, 'LLM_API_KEY', None) or ''
         self.base_url = base_url or os.environ.get('LLM_BASE_URL') or getattr(settings, 'LLM_BASE_URL', None) or 'https://api.openai.com/v1'
         self.model = model or os.environ.get('LLM_MODEL_NAME') or getattr(settings, 'LLM_MODEL_NAME', None) or 'gpt-4o-mini'
+        self.timeout = float(os.environ.get('LLM_TIMEOUT') or getattr(settings, 'LLM_TIMEOUT', 30) or 30)
+        self.max_retries = int(os.environ.get('LLM_MAX_RETRIES') or getattr(settings, 'LLM_MAX_RETRIES', 1) or 1)
 
     # ── 主入口 ──
 
@@ -89,7 +91,12 @@ class PredictionNode:
     def _multi_agent_predict(self, state: dict) -> PredictionResult:
         """3 Agent 并行分析 → Moderator 综合裁决"""
         from openai import OpenAI
-        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=self.timeout,
+            max_retries=self.max_retries,
+        )
 
         # 并行调用 3 个 Agent
         agents = {

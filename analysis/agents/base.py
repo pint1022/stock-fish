@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from loguru import logger
 
-from analysis.llm_params import temperature_kwargs
+from analysis.llm_params import temperature_kwargs, token_limit_kwargs
 
 
 @dataclass
@@ -137,7 +137,7 @@ class BaseAgent:
                 kwargs.update(temperature_kwargs(temperature))
                 if use_json_mode:
                     kwargs["response_format"] = {"type": "json_object"}
-                    kwargs["max_tokens"] = 4096  # CIO 决策 JSON 较长，需要足够 token
+                    kwargs.update(token_limit_kwargs(self.model, 4096))  # CIO 决策 JSON 较长，需要足够 token
 
                 resp = client.chat.completions.create(**kwargs)
                 raw = resp.choices[0].message.content or "{}"

@@ -24,3 +24,11 @@ def temperature_kwargs(default_temperature: Optional[float]) -> Dict[str, float]
     if temperature == 1.0:
         return {}
     return {"temperature": temperature}
+
+
+def token_limit_kwargs(model: str, max_tokens: int) -> Dict[str, int]:
+    """Return the token-limit parameter supported by the selected model."""
+    normalized = (model or "").lower()
+    if normalized.startswith("gpt-5"):
+        return {"max_completion_tokens": max_tokens}
+    return {"max_tokens": max_tokens}
